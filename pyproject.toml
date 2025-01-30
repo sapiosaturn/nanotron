@@ -50,7 +50,7 @@ fast-modeling = [
 
 nanosets = [
      "transformers",
-     "datatrove[io,processing]@git+https://github.com/huggingface/datatrove",
+     "datatrove[io,processing]==0.3.0", # pinning this because 0.4.0 and up require numpy>=2.0
      "numba",
 ]
 
