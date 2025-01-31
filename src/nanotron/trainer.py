@@ -920,6 +920,8 @@ class DistributedTrainer:
             root_folder=checkpoint_path,
             training_metadata=self.metadata,
             config=self.config,
+            sanity_checks=False, # this is to make sure trying the heavyball optimizers doesn't break
+            # to elaborate: the state dicts are probably represented differently so there's a type mismatch
         )
         save_random_states(
             random_states=self.random_states, parallel_context=self.parallel_context, root_folder=checkpoint_path

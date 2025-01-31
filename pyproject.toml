@@ -22,6 +22,9 @@ dependencies = [
     "dacite",
     "tqdm",
     "datasets",
+    "transformers>=4.48.1",
+    "setuptools>=75.8.0",
+    "heavyball>=1.5.3",
 ]
 
 [tool.setuptools.packages.find]

@@ -615,13 +615,13 @@ wheels = [
 
 [[package]]
 name = "flash-attn"
-version = "2.6.3"
+version = "2.7.4.post1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cd/1e/21321670cd3c2f225026d9fd89272cae661529238850e79f48ccf2f9e4e3/flash_attn-2.6.3.tar.gz", hash = "sha256:5bfae9500ad8e7d2937ebccb4906f3bc464d1bf66eedd0e4adabd520811c7b52", size = 2631958 }
+sdist = { url = "https://files.pythonhosted.org/packages/11/34/9bf60e736ed7bbe15055ac2dab48ec67d9dbd088d2b4ae318fd77190ab4e/flash_attn-2.7.4.post1.tar.gz", hash = "sha256:f03485c9a49a4d68d0733acdcad80ab0e72afa025a777fdc2966ceccf9d51765", size = 5986610 }
 
 [[package]]
 name = "frozenlist"
@@ -716,6 +716,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a5/d3/8650919bc3c7c6e90ee3fa7fd618bf373cbbe55dff043bd67353dbb20cd8/ftfy-6.3.1.tar.gz", hash = "sha256:9b3c3d90f84fb267fe64d375a07b7f8912d817cf86009ae134aa03e1819506ec", size = 308927 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ab/6e/81d47999aebc1b155f81eca4477a616a70f238a2549848c38983f3c22a82/ftfy-6.3.1-py3-none-any.whl", hash = "sha256:7c70eb532015cd2f9adb53f101fb6c7945988d023a085d127d1573dc49dd0083", size = 44821 },
+]
+
+[[package]]
+name = "heavyball"
+version = "1.5.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "opt-einsum" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cb/6c/912c4c6c274987f755f54acb9da3fa42333ace3342ef7926a182eebeef4d/heavyball-1.5.3.tar.gz", hash = "sha256:882f549667325d5c2dd3426c9ecd61a3135d20ae2d7652a11841e087c08ae7e2", size = 54948 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/6b/9129c0ba57b91b58d09302e2c7c84c3f4c872acc3f718e4509fef398eefd/heavyball-1.5.3-py3-none-any.whl", hash = "sha256:0ee9aa9000c7214c0519e520d9c209b23b0a1c1c57a95941737b0e28274dd871", size = 32636 },
 ]
 
 [[package]]
@@ -1171,12 +1185,15 @@ source = { editable = "." }
 dependencies = [
     { name = "dacite" },
     { name = "datasets" },
+    { name = "heavyball" },
     { name = "numpy" },
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "safetensors" },
+    { name = "setuptools" },
     { name = "torch" },
     { name = "tqdm" },
+    { name = "transformers" },
 ]
 
 [package.optional-dependencies]
@@ -1208,7 +1225,8 @@ requires-dist = [
     { name = "dacite" },
     { name = "datasets" },
     { name = "datatrove", extras = ["io", "processing"], marker = "extra == 'nanosets'", specifier = "==0.3.0" },
-    { name = "flash-attn", marker = "extra == 'fast-modeling'", specifier = ">=2.5.0,<2.7.0" },
+    { name = "flash-attn", marker = "extra == 'fast-modeling'", specifier = ">=2.7" },
+    { name = "heavyball", specifier = ">=1.5.3" },
     { name = "numba", marker = "extra == 'nanosets'" },
     { name = "numpy", specifier = "<2" },
     { name = "packaging" },
@@ -1220,8 +1238,10 @@ requires-dist = [
     { name = "s3fs", marker = "extra == 's3'" },
     { name = "s5cmd", marker = "extra == 's3'" },
     { name = "safetensors" },
+    { name = "setuptools", specifier = ">=75.8.0" },
     { name = "torch", specifier = ">=1.13.1" },
     { name = "tqdm" },
+    { name = "transformers", specifier = ">=4.48.1" },
     { name = "transformers", marker = "extra == 'nanosets'" },
 ]
 
@@ -1438,6 +1458,15 @@ version = "12.4.127"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/87/20/199b8713428322a2f22b722c62b8cc278cc53dffa9705d744484b5035ee9/nvidia_nvtx_cu12-12.4.127-py3-none-manylinux2014_x86_64.whl", hash = "sha256:781e950d9b9f60d8241ccea575b32f5105a5baf4c2351cab5256a24869f12a1a", size = 99144 },
+]
+
+[[package]]
+name = "opt-einsum"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/b9/2ac072041e899a52f20cf9510850ff58295003aa75525e58343591b0cbfb/opt_einsum-3.4.0.tar.gz", hash = "sha256:96ca72f1b886d148241348783498194c577fa30a8faac108586b14f1ba4473ac", size = 63004 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/cd/066e86230ae37ed0be70aae89aabf03ca8d9f39c8aea0dec8029455b5540/opt_einsum-3.4.0-py3-none-any.whl", hash = "sha256:69bb92469f86a1565195ece4ac0323943e83477171b91d24c35afe028a90d7cd", size = 71932 },
 ]
 
 [[package]]
