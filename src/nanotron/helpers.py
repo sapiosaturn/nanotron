@@ -346,6 +346,20 @@ def init_optimizer_and_grad_accumulator(
                     lr=optimizer_args.learning_rate_scheduler.learning_rate,
                     weight_decay=optimizer_args.weight_decay,
                 )
+        elif optimizer_args.optimizer_factory.name == "muon":
+            def optimizer(param_groups):
+                return heavyball.ForeachMuon(
+                    param_groups,
+                    lr=optimizer_args.learning_rate_scheduler.learning_rate,
+                    weight_decay=optimizer_args.weight_decay,
+                )
+        elif optimizer_args.optimizer_factory.name == "soap":
+            def optimizer(param_groups):
+                return heavyball.ForeachSOAP(
+                    param_groups,
+                    lr=optimizer_args.learning_rate_scheduler.learning_rate,
+                    weight_decay=optimizer_args.weight_decay,
+                )
 
         elif optimizer_args.optimizer_factory.name == "sgd":
 
