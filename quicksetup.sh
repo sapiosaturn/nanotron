@@ -6,6 +6,7 @@ echo "Installing dependencies"
 apt install wget curl vim nvtop -y
 echo "Installing uv"
 curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
 # sync uv
 echo "Syncing uv"
 uv sync
