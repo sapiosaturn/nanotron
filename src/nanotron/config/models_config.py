@@ -56,6 +56,12 @@ class VellichorConfig:
     use_cache: bool = True
     vocab_size: int = 32000
 
+    q_lora_rank: int = 256
+    kv_lora_rank: int = 256
+    qk_nope_head_dim: int = 96
+    qk_rope_head_dim: int = 32
+    v_head_dim: int = 128
+
     def __post_init__(self):
         # NOTE: user don't set self._init_method, ModelArgs will set it
         # then we only pass VellichorConfig around
