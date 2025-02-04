@@ -488,7 +488,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             query_states.transpose(0, 1).reshape(batch_size, seq_length, self.n_local_q_heads, self.d_qk)
         )
         q_nope, q_rope = torch.split(query_states, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
-        q_rope = self.rotary_embedding(q_rope)
+        q_rope = self.rotary_embedding(q_rope, position_ids=None)
         query_states = torch.cat([q_rope, q_nope], dim=-1).contiguous()
 
         kv_latent_plus_rope = self.kv_down_proj(hidden_states)
@@ -496,7 +496,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
         k_rope = (
             k_rope.transpose(0, 1).reshape(batch_size, seq_length, 1, self.d_qk)
         )
-        k_rope = self.rotary_embedding(k_rope)
+        k_rope = self.rotary_embedding(k_rope, position_ids=None)
         k_rope = k_rope.expand(-1, -1, self.n_local_kv_heads, -1) # [batch_size, seq_length, n_local_kv_heads, qk_rope_head_dim]
 
         kv_latent = F.rms_norm(kv_latent, (kv_latent.size(-1),), eps=1e-5)
