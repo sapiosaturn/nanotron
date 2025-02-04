@@ -123,7 +123,7 @@ class RotaryEmbedding(nn.Module):
 
 ## Copy from transformers. Non interleaved version of RoPE. Will be refactored later
 class LlamaRotaryEmbedding(nn.Module):
-    def __init__(self, dim: int, end: int, theta: float = 500000.0):
+    def __init__(self, dim: int, end: int, theta: float = 10000.0):
         super().__init__()
         self.dim = dim
         self.end = end
@@ -343,7 +343,6 @@ class CausalSelfAttention(nn.Module, AttachableStore):
         tp_pg: dist.ProcessGroup,
         layer_idx: int,
     ):
-        from flash_attn.layers.rotary import RotaryEmbedding as FlashRotaryEmbedding
 
         super().__init__()
         # Tensor parallel considerations: We split tensors along head dimension
@@ -444,24 +443,10 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             async_communication=tp_linear_async_communication
         )
 
-        # TODO(kunhao): We want to have only one version per device and not one version per layer.
-        if config.rope_interleaved:
-            self.rotary_embedding = RotaryEmbedding(
-                dim=self.qk_rope_head_dim,
-                end=config.max_position_embeddings,
-                theta=config.rope_theta,
-            )
-        else:
-            self.rotary_embedding = LlamaRotaryEmbedding(
-                dim=self.qk_rope_head_dim,
-                end=config.max_position_embeddings,
-                theta=config.rope_theta,
-            )
-        self.rope_interleaved = config.rope_interleaved
-
-        # NOTE: Only supported for training (TODO(fmom): position_ids not supported yet)
-        self.flash_rotary_embedding = FlashRotaryEmbedding(
-            dim=self.d_qk, base=config.rope_theta, interleaved=config.rope_interleaved
+        self.rotary_embedding = LlamaRotaryEmbedding(
+            dim=self.qk_rope_head_dim,
+            end=config.max_position_embeddings,
+            theta=config.rope_theta,
         )
 
         self.o_proj = TensorParallelRowLinear(
@@ -503,7 +488,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             query_states.transpose(0, 1).reshape(batch_size, seq_length, self.n_local_q_heads, self.d_qk)
         )
         q_nope, q_rope = torch.split(query_states, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
-        q_rope = self.flash_rotary_embedding(q_rope)
+        q_rope = self.rotary_embedding(q_rope)
         query_states = torch.cat([q_rope, q_nope], dim=-1).contiguous()
 
         kv_latent_plus_rope = self.kv_down_proj(hidden_states)
@@ -511,7 +496,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
         k_rope = (
             k_rope.transpose(0, 1).reshape(batch_size, seq_length, 1, self.d_qk)
         )
-        k_rope = self.flash_rotary_embedding(k_rope)
+        k_rope = self.rotary_embedding(k_rope)
         k_rope = k_rope.expand(-1, -1, self.n_local_kv_heads, -1) # [batch_size, seq_length, n_local_kv_heads, qk_rope_head_dim]
 
         kv_latent = F.rms_norm(kv_latent, (kv_latent.size(-1),), eps=1e-5)
