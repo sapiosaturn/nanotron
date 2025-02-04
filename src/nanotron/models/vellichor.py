@@ -486,7 +486,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
         kv_latent = F.rms_norm(kv_latent, (kv_latent.size(-1),), eps=1e-5)
 
         kv = self.kv_up_proj(kv_latent)
-        k_nope, value_states = torch.split(kv, [self.qk_nope_head_dim, self.d_v], dim=-1)
+        k_nope, value_states = torch.split(kv, [self.n_local_kv_heads * self.qk_nope_head_dim, self.n_local_kv_heads * self.d_v], dim=-1)
 
         k_nope = (
             k_nope.transpose(0, 1).reshape(batch_size, seq_length, self.n_local_kv_heads, self.d_qk)
