@@ -443,7 +443,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             async_communication=tp_linear_async_communication
         )
 
-        self.rotary_embedding = LlamaRotaryEmbedding(
+        self.rotary_embedding = RotaryEmbedding(
             dim=self.qk_rope_head_dim,
             end=config.max_position_embeddings,
             theta=config.rope_theta,
