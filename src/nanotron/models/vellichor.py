@@ -489,7 +489,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
         k_nope, value_states = torch.split(kv, [self.n_local_kv_heads * self.qk_nope_head_dim, self.n_local_kv_heads * self.d_v], dim=-1)
 
         k_nope = (
-            k_nope.transpose(0, 1).reshape(batch_size, seq_length, self.n_local_kv_heads, self.d_qk)
+            k_nope.transpose(0, 1).reshape(batch_size, seq_length, self.n_local_kv_heads, self.qk_nope_head_dim)
         )
         key_states = torch.cat([k_rope, k_nope], dim=-1).contiguous()
 
