@@ -389,24 +389,6 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             parallel_config.tp_linear_async_communication if parallel_config is not None else False
         )
 
-        # build the slice config for self.qkv for save/load
-        # shard are done within the contiguous chunk
-        # qkv_contiguous_chunks = (
-        #     config.num_attention_heads * self.d_qk,  # shape of q
-        #     config.num_key_value_heads * self.d_qk,  # shape of k
-        #     config.num_key_value_heads * self.d_qk,  # shape of v
-        # )
-        # self.qkv_proj = TensorParallelColumnLinear(
-        #     self.d_model,
-        #     config.num_attention_heads * self.d_qk + 2 * config.num_key_value_heads * self.d_qk,
-        #     pg=tp_pg,
-        #     mode=tp_mode,
-        #     bias=False,
-        #     async_communication=tp_linear_async_communication,
-        #     contiguous_chunks=qkv_contiguous_chunks,
-        #     tp_recompute_allgather=parallel_config.tp_recompute_allgather,
-        # )
-
         self.q_down_proj = TensorParallelColumnLinear(
             self.d_model,
             self.q_lora_rank,
@@ -479,7 +461,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             flash_attn_with_kvcache,
         )
 
-        batch_size, seq_length, _ = hidden_states.shape
+        seq_length, batch_size, _ = hidden_states.shape
         q_latent = self.q_down_proj(hidden_states)
         q_latent = F.rms_norm(q_latent, (q_latent.size(-1),), eps=1e-5)
         query_states = self.q_up_proj(q_latent)
@@ -496,7 +478,7 @@ class CausalSelfAttention(nn.Module, AttachableStore):
         kv_latent_plus_rope = self.kv_down_proj(hidden_states)
         kv_latent, k_rope = torch.split(kv_latent_plus_rope, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         k_rope = (
-            k_rope.transpose(0, 1).reshape(batch_size, seq_length, 1, self.d_qk)
+            k_rope.transpose(0, 1).reshape(batch_size, seq_length, 1, self.qk_rope_head_dim)
         )
         k_rope = self.rotary_embedding(k_rope, position_ids=position_ids)
         k_rope = k_rope.expand(-1, -1, self.n_local_kv_heads, -1) # [batch_size, seq_length, n_local_kv_heads, qk_rope_head_dim]
