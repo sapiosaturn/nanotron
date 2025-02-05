@@ -365,8 +365,10 @@ class CausalSelfAttention(nn.Module, AttachableStore):
         assert (
             config.num_attention_heads % config.num_key_value_heads == 0
         ), f"Number of attention heads ({config.num_attention_heads}) must be divisible by number of key/value heads ({config.num_key_value_heads})."
-        self.n_local_q_heads = config.num_attention_heads // tp_pg.size()
-        self.n_local_kv_heads = config.num_key_value_heads // tp_pg.size()
+        # self.n_local_q_heads = config.num_attention_heads // tp_pg.size()
+        # self.n_local_kv_heads = config.num_key_value_heads // tp_pg.size()
+        self.n_local_q_heads = config.num_attention_heads
+        self.n_local_kv_heads = config.num_key_value_heads
         self.n_repeats = config.num_attention_heads // config.num_key_value_heads
         self.is_gqa = config.num_attention_heads != config.num_key_value_heads  # Whether we are using GQA or not
 
@@ -389,40 +391,28 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             parallel_config.tp_linear_async_communication if parallel_config is not None else False
         )
 
-        self.q_down_proj = TensorParallelColumnLinear(
+        self.q_down_proj = nn.Linear(
             self.d_model,
             self.q_lora_rank,
-            pg=tp_pg,
-            mode=tp_mode,
             bias=False,
-            async_communication=tp_linear_async_communication
         )
 
-        self.kv_down_proj = TensorParallelColumnLinear(
+        self.kv_down_proj = nn.Linear(
             self.d_model,
             self.kv_lora_rank + self.qk_rope_head_dim,
-            pg=tp_pg,
-            mode=tp_mode,
             bias=False,
-            async_communication=tp_linear_async_communication
         )
 
-        self.q_up_proj = TensorParallelRowLinear(
+        self.q_up_proj = nn.Linear(
             self.q_lora_rank,
             self.d_qk * config.num_attention_heads,
-            pg=tp_pg,
-            mode=tp_mode,
             bias=False,
-            async_communication=tp_linear_async_communication
         )
 
-        self.kv_up_proj = TensorParallelRowLinear(
+        self.kv_up_proj = nn.Linear(
             self.kv_lora_rank,
             config.num_key_value_heads * (self.d_v + self.qk_nope_head_dim),
-            pg=tp_pg,
-            mode=tp_mode,
             bias=False,
-            async_communication=tp_linear_async_communication
         )
 
         self.rotary_embedding = RotaryEmbedding(
@@ -431,13 +421,10 @@ class CausalSelfAttention(nn.Module, AttachableStore):
             theta=config.rope_theta,
         )
 
-        self.o_proj = TensorParallelRowLinear(
+        self.o_proj = nn.Linear(
             config.num_attention_heads * self.d_v,
             self.d_model,
-            pg=tp_pg,
-            mode=tp_mode,
             bias=False,
-            async_communication=tp_linear_async_communication,
         )
 
         self.attention = CoreAttention(
