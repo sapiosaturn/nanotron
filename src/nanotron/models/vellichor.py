@@ -46,6 +46,8 @@ from nanotron.random import RandomStates
 from nanotron.scaling.parametrization import SpectralMupParametrizator, StandardParametrizator
 from nanotron.utils import checkpoint_method
 
+from fla.layers import GatedDeltaNet
+
 logger = logging.get_logger(__name__)
 
 
@@ -534,11 +536,17 @@ class VellichorDecoderLayer(nn.Module):
     ):
         super().__init__()
         self.input_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.attn = CausalSelfAttention(
-            config=config,
-            parallel_config=parallel_config,
-            tp_pg=tp_pg,
-            layer_idx=layer_idx,
+        # self.attn = CausalSelfAttention(
+        #     config=config,
+        #     parallel_config=parallel_config,
+        #     tp_pg=tp_pg,
+        #     layer_idx=layer_idx,
+        # )
+        self.attn = GatedDeltaNet(
+            hidden_size=config.hidden_size,
+            head_dim=config.qk_rope_head_dim + config.qk_nope_head_dim, # just for compatibility for now, since num heads x head dim doesn't have to equal embed dim
+            num_heads=config.num_attention_heads,
+            mode="chunk"
         )
 
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -554,8 +562,10 @@ class VellichorDecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
-        output = self.attn(hidden_states=hidden_states, sequence_mask=sequence_mask)
-        hidden_states = output["hidden_states"]
+        # output = self.attn(hidden_states=hidden_states, sequence_mask=sequence_mask)
+        output = self.attn(hidden_states=hidden_states.permute(1, 0, 2).contiguous(), attention_mask=sequence_mask)
+        # hidden_states = output["hidden_states"]
+        hidden_states = output[0].permute(1, 0, 2).contiguous()
         hidden_states = hidden_states + residual
 
         residual = hidden_states
@@ -563,8 +573,8 @@ class VellichorDecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states=hidden_states)["hidden_states"]
         hidden_states = hidden_states + residual
 
-        return hidden_states, output["sequence_mask"]
-
+        # return hidden_states, output["sequence_mask"]
+        return hidden_states, sequence_mask
     def _checkpointed_forward(
         self,
         hidden_states: torch.Tensor,

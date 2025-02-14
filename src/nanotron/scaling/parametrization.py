@@ -12,7 +12,7 @@ from nanotron.parallel.tensor_parallel.nn import (
 )
 from torch import nn
 from torch.nn import init
-
+import fla.layers
 
 class ParametrizationMethod(Enum):
     STANDARD = auto()
@@ -25,7 +25,7 @@ class Parametrizator:
 
     def parametrize(self, param_name: str, module: nn.Module):
         if not isinstance(module, tuple(self.MODULE_TO_PARAMETRIZE.keys())):
-            raise Exception(f"Parameter {param_name} was not initialized")
+            raise Exception(f"Parameter {param_name} was not initialized, type {type(module)}")
 
         return self.MODULE_TO_PARAMETRIZE[type(module)](param_name, module)
 
@@ -39,10 +39,17 @@ class StandardParametrizator(Parametrizator):
             TritonRMSNorm: self._parametrize_layer_norm,
             TensorParallelEmbedding: self._parametrize_embedding,
             nn.Linear: self._parametrize_nn_linear,
+            fla.layers.gated_deltanet.GatedDeltaNet: self._do_nothing,
+            fla.modules.convolution.ShortConvolution: self._do_nothing,
+            fla.modules.fused_norm_gate.FusedRMSNormSwishGate: self._do_nothing,
         }
 
         self.std = config.init_method.std
         self.num_layers = config.model_config.num_hidden_layers
+
+    def _do_nothing(self, param_name: str, module: nn.Module):
+        # for things like flash linear attention where they handle their own initialization, can change later
+        pass
 
     def _parametrize_nn_linear(self, param_name: str, module: nn.Module):
         assert param_name in ["weight", "bias"]
