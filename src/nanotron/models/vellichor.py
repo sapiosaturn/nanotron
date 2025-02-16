@@ -548,6 +548,7 @@ class VellichorDecoderLayer(nn.Module):
             num_heads=config.num_attention_heads,
             mode="chunk"
         )
+        del self.attn._parameters["D"]
 
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.mlp = MLP(config=config, parallel_config=parallel_config, tp_pg=tp_pg)

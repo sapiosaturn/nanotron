@@ -19,6 +19,7 @@ echo "Installing flash-linear-attention"
 uv pip install -U git+https://github.com/fla-org/flash-linear-attention
 uv pip install "numpy<2" #to not break nanotron
 uv pip install "causal-conv1d>=1.4.0" --no-build-isolation
+uv pip install "triton==3.1.0" # to not break flash linear attention
 # activate venv
 echo "Activating venv"
 source .venv/bin/activate
