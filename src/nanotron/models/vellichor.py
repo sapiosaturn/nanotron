@@ -544,7 +544,7 @@ class VellichorDecoderLayer(nn.Module):
         # )
         self.attn = GatedDeltaNet(
             hidden_size=config.hidden_size,
-            head_dim=config.qk_rope_head_dim + config.qk_nope_head_dim, # just for compatibility for now, since num heads x head dim doesn't have to equal embed dim
+            head_dim=config.v_head_dim,
             num_heads=config.num_attention_heads,
             mode="chunk"
         )
