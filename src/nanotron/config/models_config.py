@@ -61,6 +61,9 @@ class VellichorConfig:
     qk_nope_head_dim: int = 96
     qk_rope_head_dim: int = 32
     v_head_dim: int = 128
+    linear_attn_head_dim: int = 96
+    linear_attn_num_heads: int = 6
+    full_attention_every_n_layers: int = 1
 
     def __post_init__(self):
         # NOTE: user don't set self._init_method, ModelArgs will set it

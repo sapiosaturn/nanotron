@@ -3,7 +3,7 @@
 echo "Updating apt"
 apt update
 echo "Installing dependencies"
-apt install wget curl vim nvtop -y
+apt install wget curl vim nvtop btop tmux -y
 echo "Installing uv"
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env

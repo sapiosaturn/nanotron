@@ -18,6 +18,7 @@
 from typing import Dict, List, Optional, Union
 
 import torch
+from fla.layers import GatedDeltaNet
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import CheckpointFunction
@@ -45,8 +46,6 @@ from nanotron.parallel.tensor_parallel.nn import (
 from nanotron.random import RandomStates
 from nanotron.scaling.parametrization import SpectralMupParametrizator, StandardParametrizator
 from nanotron.utils import checkpoint_method
-
-from fla.layers import GatedDeltaNet
 
 logger = logging.get_logger(__name__)
 
@@ -122,79 +121,6 @@ class RotaryEmbedding(nn.Module):
         x_out = torch.view_as_real(complex_x * complex_freqs).view(batch_size, seq_length, num_heads, inner_dim)
         return x_out.type(dtype)
 
-
-## Copy from transformers. Non interleaved version of RoPE. Will be refactored later
-class LlamaRotaryEmbedding(nn.Module):
-    def __init__(self, dim: int, end: int, theta: float = 10000.0):
-        super().__init__()
-        self.dim = dim
-        self.end = end
-        self.theta = theta
-        self.init_rotary_embeddings()
-
-    def init_rotary_embeddings(self):
-        inv_freq = 1.0 / (
-            self.theta ** (torch.arange(0, self.dim, 2, dtype=torch.float, device="cpu") / self.dim)
-        )  # important to compute on CPU
-        self.register_buffer(
-            "inv_freq", torch.empty(self.dim // 2, dtype=torch.float, device="cuda"), persistent=False
-        )
-        self.inv_freq = self.inv_freq.to(
-            torch.float
-        )  # make it float32 before copy to avoid precision loss during copy_
-        self.inv_freq.copy_(inv_freq)
-
-    @torch.no_grad()
-    def forward(
-        self,
-        x: torch.Tensor,  # [batch_size, seq_length, num_heads, d_qk]
-        position_ids: Optional[torch.LongTensor],  # [batch_size, seq_length]
-    ):
-        # x: [bs, num_attention_heads, seq_len, head_size]
-        inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1)
-        position_ids_expanded = position_ids[:, None, :].float()
-        # Force float32 since bfloat16 loses precision on long contexts
-        # See https://github.com/huggingface/transformers/pull/29285
-        device_type = x.device.type
-        device_type = device_type if isinstance(device_type, str) and device_type != "mps" else "cpu"
-        with torch.autocast(device_type=device_type, enabled=False):
-            freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(1, 2)
-            emb = torch.cat((freqs, freqs), dim=-1)
-            cos = emb.cos()
-            sin = emb.sin()
-        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
-
-    def rotate_half(self, x):
-        """Rotates half the hidden dims of the input."""
-        x1 = x[..., : x.shape[-1] // 2]
-        x2 = x[..., x.shape[-1] // 2 :]
-        return torch.cat((-x2, x1), dim=-1)
-
-    def apply_rotary_pos_emb(self, q, k, cos, sin, unsqueeze_dim=2):
-        """Applies Rotary Position Embedding to the query and key tensors.
-
-        Args:
-            q (`torch.Tensor`): The query tensor.
-            k (`torch.Tensor`): The key tensor.
-            cos (`torch.Tensor`): The cosine part of the rotary embedding.
-            sin (`torch.Tensor`): The sine part of the rotary embedding.
-            unsqueeze_dim (`int`, *optional*, defaults to 1):
-                The 'unsqueeze_dim' argument specifies the dimension along which to unsqueeze cos[position_ids] and
-                sin[position_ids] so that they can be properly broadcasted to the dimensions of q and k. For example, note
-                that cos[position_ids] and sin[position_ids] have the shape [batch_size, seq_len, head_dim]. Then, if q and
-                k have the shape [batch_size, heads, seq_len, head_dim], then setting unsqueeze_dim=1 makes
-                cos[position_ids] and sin[position_ids] broadcastable to the shapes of q and k. Similarly, if q and k have
-                the shape [batch_size, seq_len, heads, head_dim], then set unsqueeze_dim=2.
-        Returns:
-            `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
-        """
-        cos = cos.unsqueeze(unsqueeze_dim)
-        sin = sin.unsqueeze(unsqueeze_dim)
-        q_embed = (q * cos) + (self.rotate_half(q) * sin)
-        k_embed = (k * cos) + (self.rotate_half(k) * sin)
-        return q_embed, k_embed
-
-
 class GLUActivation(nn.Module):
     def __init__(self, act_fn_name: str):
         super().__init__()
@@ -203,7 +129,6 @@ class GLUActivation(nn.Module):
     def forward(self, merged_states: torch.Tensor):
         gate_states, up_states = torch.split(merged_states, merged_states.shape[-1] // 2, dim=-1)
         return self.act(gate_states) * up_states
-
 
 class MLP(nn.Module):
     def __init__(
@@ -248,7 +173,6 @@ class MLP(nn.Module):
         merged_states = self.gate_up_proj(hidden_states)
         hidden_states = self.down_proj(self.split_silu_mul(merged_states))
         return {"hidden_states": hidden_states}
-
 
 class CoreAttention(nn.Module):
     def __init__(self, config: VellichorConfig, parallel_config: Optional[ParallelismArgs], layer_idx: int):
@@ -308,7 +232,6 @@ class CoreAttention(nn.Module):
 
         return attn_output
 
-
 def pad_to_right(tensor, mask, new_tensor=None):
     """Transform a left-padded tensor into a right-padded tensor. (Useful for prefilling key/value states)
     Args:
@@ -335,7 +258,6 @@ def pad_to_right(tensor, mask, new_tensor=None):
     # We fill the new tensor with the useful values
     new_tensor[:, : right_padded_mask.shape[1], :, :][right_padded_mask] = useful_values
     return new_tensor, right_padded_mask
-
 
 class CausalSelfAttention(nn.Module, AttachableStore):
     def __init__(
@@ -525,7 +447,6 @@ class CausalSelfAttention(nn.Module, AttachableStore):
 
         return {"hidden_states": output, "sequence_mask": sequence_mask}
 
-
 class VellichorDecoderLayer(nn.Module):
     def __init__(
         self,
@@ -536,19 +457,12 @@ class VellichorDecoderLayer(nn.Module):
     ):
         super().__init__()
         self.input_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        # self.attn = CausalSelfAttention(
-        #     config=config,
-        #     parallel_config=parallel_config,
-        #     tp_pg=tp_pg,
-        #     layer_idx=layer_idx,
-        # )
-        self.attn = GatedDeltaNet(
-            hidden_size=config.hidden_size,
-            head_dim=config.v_head_dim,
-            num_heads=config.num_attention_heads,
-            mode="chunk"
+        self.attn = CausalSelfAttention(
+            config=config,
+            parallel_config=parallel_config,
+            tp_pg=tp_pg,
+            layer_idx=layer_idx,
         )
-        del self.attn._parameters["D"]
 
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.mlp = MLP(config=config, parallel_config=parallel_config, tp_pg=tp_pg)
@@ -563,10 +477,8 @@ class VellichorDecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
-        # output = self.attn(hidden_states=hidden_states, sequence_mask=sequence_mask)
-        output = self.attn(hidden_states=hidden_states.permute(1, 0, 2).contiguous(), attention_mask=sequence_mask)
-        # hidden_states = output["hidden_states"]
-        hidden_states = output[0].permute(1, 0, 2).contiguous()
+        output = self.attn(hidden_states=hidden_states, sequence_mask=sequence_mask)
+        hidden_states = output["hidden_states"]
         hidden_states = hidden_states + residual
 
         residual = hidden_states
@@ -574,8 +486,8 @@ class VellichorDecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states=hidden_states)["hidden_states"]
         hidden_states = hidden_states + residual
 
-        # return hidden_states, output["sequence_mask"]
-        return hidden_states, sequence_mask
+        return hidden_states, output["sequence_mask"]
+
     def _checkpointed_forward(
         self,
         hidden_states: torch.Tensor,
@@ -599,6 +511,70 @@ class VellichorDecoderLayer(nn.Module):
             "sequence_mask": sequence_mask,
         }
 
+class VellichorLinearDecoderLayer(nn.Module):
+    def __init__(
+        self,
+        config: VellichorConfig,
+        parallel_config: Optional[ParallelismArgs],
+        tp_pg: dist.ProcessGroup,
+        layer_idx: int,
+    ):
+        super().__init__()
+        self.input_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        assert config.linear_attn_head_dim * config.linear_attn_num_heads == config.hidden_size * 0.75, "gated deltanet num heads * head dim must be 75% of the hidden size"
+        self.attn = GatedDeltaNet(
+            hidden_size=config.hidden_size,
+            head_dim=config.linear_attn_head_dim,
+            num_heads=config.linear_attn_num_heads,
+            mode="chunk"
+        )
+        del self.attn._parameters["D"]
+
+        self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.mlp = MLP(config=config, parallel_config=parallel_config, tp_pg=tp_pg)
+
+        self.recompute_layer = parallel_config.recompute_layer
+
+    def _core_forward(
+        self,
+        hidden_states: Union[torch.Tensor, TensorPointer],
+        sequence_mask: Union[torch.Tensor, TensorPointer],
+    ) -> List[Union[torch.Tensor, TensorPointer]]:
+        residual = hidden_states
+        hidden_states = self.input_layernorm(hidden_states)
+        output = self.attn(hidden_states=hidden_states.permute(1, 0, 2).contiguous(), attention_mask=sequence_mask)
+        hidden_states = output[0].permute(1, 0, 2).contiguous()
+        hidden_states = hidden_states + residual
+
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states=hidden_states)["hidden_states"]
+        hidden_states = hidden_states + residual
+
+        return hidden_states, sequence_mask
+
+    def _checkpointed_forward(
+        self,
+        hidden_states: torch.Tensor,
+        sequence_mask: torch.Tensor,
+    ) -> List[torch.Tensor]:
+        return CheckpointFunction.apply(self._core_forward, True, hidden_states, sequence_mask)
+
+    def forward(
+        self,
+        hidden_states: Union[torch.Tensor, TensorPointer],
+        sequence_mask: Union[torch.Tensor, TensorPointer],
+    ) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
+
+        if self.recompute_layer and not isinstance(hidden_states, TensorPointer):
+            hidden_states, sequence_mask = self._checkpointed_forward(hidden_states, sequence_mask)
+        else:
+            hidden_states, sequence_mask = self._core_forward(hidden_states, sequence_mask)
+
+        return {
+            "hidden_states": hidden_states,
+            "sequence_mask": sequence_mask,
+        }
 
 class Embedding(nn.Module, AttachableStore):
     def __init__(self, tp_pg: dist.ProcessGroup, config: VellichorConfig, parallel_config: Optional[ParallelismArgs]):
@@ -628,7 +604,6 @@ class Embedding(nn.Module, AttachableStore):
         input_ids = input_ids.transpose(0, 1)
         input_embeds = self.token_embedding(input_ids)
         return {"input_embeds": input_embeds}
-
 
 class VellichorModel(nn.Module):
     """Build pipeline graph"""
@@ -670,11 +645,29 @@ class VellichorModel(nn.Module):
                 level=logging.INFO,
                 rank=0,
             )
+
+        assert config.full_attention_every_n_layers > 0, "full_attention_every_n_layers must be greater than 0"
+        assert config.full_attention_every_n_layers <= config.num_hidden_layers, "full_attention_every_n_layers must be less than or equal to num_hidden_layers"
+        assert config.num_hidden_layers % config.full_attention_every_n_layers == 0, "num_hidden_layers must be divisible by full_attention_every_n_layers"
+
         self.decoder = nn.ModuleList(
             [
                 PipelineBlock(
                     p2p=self.p2p,
                     module_builder=VellichorDecoderLayer,
+                    module_kwargs={
+                        "config": config,
+                        "parallel_config": parallel_config,
+                        "tp_pg": parallel_context.tp_pg,
+                        "layer_idx": layer_idx,
+                    },
+                    module_input_keys={"hidden_states", "sequence_mask"},
+                    module_output_keys={"hidden_states", "sequence_mask"},
+                )
+                if layer_idx % config.full_attention_every_n_layers == 0
+                else PipelineBlock(
+                    p2p=self.p2p,
+                    module_builder=VellichorLinearDecoderLayer,
                     module_kwargs={
                         "config": config,
                         "parallel_config": parallel_config,
@@ -790,12 +783,10 @@ class VellichorModel(nn.Module):
         hardware_flops_per_s = hardware_flops / (iteration_time_in_sec * world_size * 1e12)
         return model_flops_per_s, hardware_flops_per_s
 
-
 @torch.jit.script
 def masked_mean(loss, label_mask, dtype):
     # type: (Tensor, Tensor, torch.dtype) -> Tensor
     return (loss * label_mask).sum(dtype=dtype) / label_mask.sum()
-
 
 class Loss(nn.Module):
     def __init__(self, tp_pg: dist.ProcessGroup):
@@ -819,7 +810,6 @@ class Loss(nn.Module):
         # I think indexing causes a sync we don't actually want
         # loss = loss[label_mask].sum()
         return {"loss": loss}
-
 
 class VellichorForTraining(NanotronModel):
     def __init__(
@@ -938,7 +928,6 @@ class VellichorForTraining(NanotronModel):
     def get_flops_per_sec(self, iteration_time_in_sec, sequence_length, global_batch_size):
         """Get flops per second for a given model"""
         return self.model.get_flops_per_sec(iteration_time_in_sec, sequence_length, global_batch_size)
-
 
 def get_flops(
     num_layers,
