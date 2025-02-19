@@ -463,10 +463,10 @@ class VellichorDecoderLayer(nn.Module):
             tp_pg=tp_pg,
             layer_idx=layer_idx,
         )
-
+        self.attn = torch.compile(self.attn)
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.mlp = MLP(config=config, parallel_config=parallel_config, tp_pg=tp_pg)
-
+        self.mlp = torch.compile(self.mlp)
         self.recompute_layer = parallel_config.recompute_layer
 
     def _core_forward(
@@ -532,6 +532,7 @@ class VellichorLinearDecoderLayer(nn.Module):
 
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.mlp = MLP(config=config, parallel_config=parallel_config, tp_pg=tp_pg)
+        self.mlp = torch.compile(self.mlp)
 
         self.recompute_layer = parallel_config.recompute_layer
 
@@ -664,7 +665,7 @@ class VellichorModel(nn.Module):
                     module_input_keys={"hidden_states", "sequence_mask"},
                     module_output_keys={"hidden_states", "sequence_mask"},
                 )
-                if layer_idx % config.full_attention_every_n_layers == 0
+                if (layer_idx + 1) % config.full_attention_every_n_layers == 0
                 else PipelineBlock(
                     p2p=self.p2p,
                     module_builder=VellichorLinearDecoderLayer,
