@@ -259,6 +259,7 @@ class CoreAttention(nn.Module):
         self.is_using_mup = config.is_using_mup
 
         self.checkpoint_attention = False  # Because flash_attn already does checkpointing
+        self.use_qk_norm = config.use_qk_norm
 
     @checkpoint_method(attr_name="checkpoint_attention")
     def forward(
@@ -284,7 +285,7 @@ class CoreAttention(nn.Module):
         # NOTE: this scale is for µTransfer,
         # in SP, we use sqrt(1/d_h)
         softmax_scale = 1 / query_states.shape[-1] if self.is_using_mup else None
-        if self.config.use_qk_norm:
+        if self.use_qk_norm:
             query_states = F.rms_norm(query_states, (query_states.size(-1),))
             key_states = F.rms_norm(key_states, (key_states.size(-1),))
 
