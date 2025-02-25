@@ -108,6 +108,7 @@ class LlamaConfig:
     tie_word_embeddings: bool = False
     use_cache: bool = True
     vocab_size: int = 32000
+    use_qk_norm: bool = False
 
     def __post_init__(self):
         # NOTE: user don't set self._init_method, ModelArgs will set it

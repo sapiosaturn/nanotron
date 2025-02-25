@@ -17,6 +17,7 @@
 from typing import Dict, List, Optional, Union
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.utils.checkpoint import CheckpointFunction
 
@@ -283,6 +284,10 @@ class CoreAttention(nn.Module):
         # NOTE: this scale is for µTransfer,
         # in SP, we use sqrt(1/d_h)
         softmax_scale = 1 / query_states.shape[-1] if self.is_using_mup else None
+        if self.config.use_qk_norm:
+            query_states = F.rms_norm(query_states, (query_states.size(-1),))
+            key_states = F.rms_norm(key_states, (key_states.size(-1),))
+
         attn_output = flash_attn_varlen_func(
             q=query_states,
             k=key_states,
