@@ -914,7 +914,7 @@ class DeepSeekV3ForTraining(NanotronModel):
         non_none_expert_loads = [e for e in all_expert_loads if e is not None]
         if len(non_none_expert_loads) > 0:
             # Concatenate all expert loads into a single tensor, to get variance across all experts
-            expert_loads_tensor = torch.cat(all_expert_loads).float()
+            expert_loads_tensor = torch.cat(non_none_expert_loads).float()
             # Compute metrics
             mean_load = torch.mean(expert_loads_tensor)
             std_load = torch.std(expert_loads_tensor)
