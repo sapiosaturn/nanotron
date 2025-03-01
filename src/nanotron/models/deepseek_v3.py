@@ -923,27 +923,27 @@ class DeepSeekV3ForTraining(NanotronModel):
             return []
 
     def get_flops_per_sec(self, iteration_time_in_sec, sequence_length, global_batch_size):
-        """Calculate model throughput in FLOPS."""
-        num_layers = self.config.num_hidden_layers
-        hidden_size = self.config.hidden_size
-        num_heads = self.config.num_attention_heads
-        num_kv_heads = self.config.num_key_value_heads
-        vocab_size = self.config.vocab_size
-        ffn_hidden_size = self.config.intermediate_size
+        """Get flops per second for a given model"""
+        world_size = self.parallel_context.world_pg.size()
+        try:
+            num_key_values_heads = self.config.num_key_value_heads
+        except AttributeError:
+            num_key_values_heads = self.config.num_attention_heads
 
-        # Calculate total floating point operations (FLOPs)
-        total_flops = get_flops(
-            num_layers=num_layers,
-            hidden_size=hidden_size,
-            num_heads=num_heads,
-            num_key_value_heads=num_kv_heads,
-            vocab_size=vocab_size,
+        model_flops, hardware_flops = get_flops(
+            num_layers=self.config.num_hidden_layers,
+            hidden_size=self.config.hidden_size,
+            num_heads=self.config.num_attention_heads,
+            num_key_value_heads=num_key_values_heads,
+            vocab_size=self.config.vocab_size,
+            ffn_hidden_size=self.config.intermediate_size,
             seq_len=sequence_length,
-            ffn_hidden_size=ffn_hidden_size,
             batch_size=global_batch_size,
         )
 
-        return total_flops / iteration_time_in_sec
+        model_flops_per_s = model_flops / (iteration_time_in_sec * world_size * 1e12)
+        hardware_flops_per_s = hardware_flops / (iteration_time_in_sec * world_size * 1e12)
+        return model_flops_per_s, hardware_flops_per_s
 
     @torch.no_grad()
     def init_model_randomly(self, config: Config):
@@ -1006,6 +1006,7 @@ class DeepSeekV3ForTraining(NanotronModel):
         }, f"Somehow the initialized set of parameters don't match:\n - Expected: { {name for name, _ in model.named_parameters()} }\n - Got: {initialized_parameters}"
 
 # Note: We reuse the get_flops function from the llama model
+# TODO: fix this to be correct for DeepSeekV3
 def get_flops(
     num_layers,
     hidden_size,
