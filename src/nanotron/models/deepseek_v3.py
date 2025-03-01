@@ -642,7 +642,7 @@ class DeepSeekV3Layer(nn.Module):
             layer_idx=layer_idx,
         )
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.freqs_cis = precompute_freqs_cis(config=config)
+        self.register_buffer("freqs_cis", precompute_freqs_cis(config=config))
  
         # Use MoE for layers beyond the dense layers
         if layer_idx >= config.n_dense_layers:
