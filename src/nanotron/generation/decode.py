@@ -444,16 +444,8 @@ def decode_text(
             for state, batch in zip(decoder_states, batches):
                 if is_decoder_input_rank:
                     assert all(isinstance(elt, torch.Tensor) for elt in state.generation_ids)
-                    if isinstance(model, DeepSeekV3Model):
-                        batch_generated_ids = torch.cat(
-                            [x.transpose(0, 1) for x in state.generation_ids], dim=-1
-                        )
-                        batch_generated_mask = torch.cat(
-                            [x.transpose(0, 1) for x in state.generation_mask], dim=-1
-                        )
-                    else:
-                        batch_generated_ids = torch.cat(state.generation_ids, dim=-1)
-                        batch_generated_mask = torch.cat(state.generation_mask, dim=-1)
+                    batch_generated_ids = torch.cat(state.generation_ids, dim=-1)
+                    batch_generated_mask = torch.cat(state.generation_mask, dim=-1)
                 else:
                     assert all(isinstance(elt, TensorPointer) for elt in state.generation_ids)
                     batch_generated_ids = TensorPointer(group_rank=decoder_input_rank)
@@ -587,7 +579,7 @@ def decode_tokenized(
                             input_ids=state.new_input_ids,
                             input_mask=state.new_input_mask,
                         )
-                        if isinstance(sharded_logits, torch.Tensor):
+                        if isinstance(sharded_logits, torch.Tensor) and not isinstance(model, DeepSeekV3Model):
                             sharded_logits = sharded_logits.transpose(0, 1)
 
                     # Communicate
