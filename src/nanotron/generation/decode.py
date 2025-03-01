@@ -445,8 +445,10 @@ def decode_text(
                 if is_decoder_input_rank:
                     assert all(isinstance(elt, torch.Tensor) for elt in state.generation_ids)
                     if isinstance(model, DeepSeekV3Model):
-                        batch_generated_ids = torch.cat(state.generation_ids.transpose(0, 1), dim=-1)
-                        batch_generated_mask = torch.cat(state.generation_mask.transpose(0, 1), dim=-1)
+                        batch_generated_ids = torch.cat(
+                            (x.transpose(0, 1) for x in state.generation_ids), dim=-1)
+                        batch_generated_mask = torch.cat(
+                            (x.transpose(0, 1) for x in state.generation_mask), dim=-1)
                     else:
                         batch_generated_ids = torch.cat(state.generation_ids, dim=-1)
                         batch_generated_mask = torch.cat(state.generation_mask, dim=-1)
