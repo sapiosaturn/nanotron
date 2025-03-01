@@ -178,7 +178,6 @@ class CoreAttention(nn.Module):
         self.d_qk = config.hidden_size // config.num_attention_heads
         self.d_v = config.hidden_size // config.num_attention_heads
         self.is_using_mup = config.is_using_mup
-        self.use_qk_norm = config.use_qk_norm
         self.checkpoint_attention = False  # Because flash_attn already does checkpointing
 
     @checkpoint_method(attr_name="checkpoint_attention")
@@ -201,11 +200,6 @@ class CoreAttention(nn.Module):
         # TODO(kunhao): flash attn's causal means that the query can only attend to the keys before it. This is not
         # what we want if we are using kv cache. This is a hack as we always have q_length == 1 when using kv cache.
         causal = False if q_sequence_mask.shape[1] == 1 else True
-
-        # our first change from the llama model for testing
-        if self.use_qk_norm:
-            query_states = F.rms_norm(query_states, (query_states.size(-1),), eps=1e-5)
-            key_states = F.rms_norm(key_states, (key_states.size(-1),), eps=1e-5)
 
         # NOTE: this scale is for µTransfer,
         # in SP, we use sqrt(1/d_h)
