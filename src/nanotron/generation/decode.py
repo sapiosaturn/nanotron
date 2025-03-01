@@ -271,7 +271,7 @@ def decode_text(
                             input_mask=batch_generated_mask,
                         )
 
-                    if isinstance(sharded_logits, torch.Tensor) and logits_are_batch_first:
+                    if isinstance(sharded_logits, torch.Tensor) and logits_are_batch_first and not isinstance(model, DeepSeekV3Model):
                         sharded_logits = sharded_logits.transpose(0, 1)
                     # Communicate
                     # TODO @thomasw21: Make a diagram to show how this works
