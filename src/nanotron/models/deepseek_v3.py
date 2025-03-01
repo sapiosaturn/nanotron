@@ -1017,37 +1017,47 @@ def get_flops(
     ffn_hidden_size,
     batch_size=1,
 ):
-    """
-    Calculate model FLOPs based on model configuration.
-    This is copied from the llama implementation with adjustments for DeepSeekV3.
-    """
-    # Parameters
-    head_dim = hidden_size // num_heads
-    num_kv_groups = num_heads // num_key_value_heads
-    # FLOPs per token
-    flops_per_token = 0
-    # Embedding lookup (sparse operation - negligible compared to matmuls)
-    # Each layer
-    for _ in range(num_layers):
-        # MLA attention operations
-        # qkv projections
-        flops_per_token += 3 * hidden_size * hidden_size
-        # attention scores
-        flops_per_token += num_heads * seq_len * head_dim
-        # attention context
-        flops_per_token += num_heads * seq_len * head_dim
-        # output projection
-        flops_per_token += hidden_size * hidden_size
-        # MLP/MoE (approximating for now - actual cost is more complex for MoE)
-        flops_per_token += 2 * hidden_size * ffn_hidden_size + ffn_hidden_size * hidden_size
-        # Layer norms
-        flops_per_token += 2 * hidden_size
-        # Residual connections
-        flops_per_token += 2 * hidden_size
-    # Final layer norm
-    flops_per_token += hidden_size
-    # LM head
-    flops_per_token += hidden_size * vocab_size
-    # Total FLOPs
-    total_flops = flops_per_token * batch_size * seq_len
-    return total_flops
+    if num_key_value_heads is None:
+        num_key_value_heads = num_heads
+    hidden_size_per_head = hidden_size // num_heads
+    # In the following we mark the reduced dimension with parentheses
+    # decoder
+    # self attention
+    ## qkv projection
+    decoder_qkv_proj_flops_fwd = (
+        2 * num_layers * batch_size * seq_len * (hidden_size) * num_heads * hidden_size_per_head
+        + 2 * num_layers * batch_size * seq_len * (hidden_size) * 2 * num_key_value_heads * hidden_size_per_head
+    )
+    ## qk logits
+    decoder_qk_logits_flops_fwd = 2 * num_layers * batch_size * num_heads * seq_len * (hidden_size_per_head) * seq_len
+    ## v logits
+    decoder_v_logits_flops_fwd = 2 * num_layers * batch_size * num_heads * seq_len * (seq_len) * hidden_size_per_head
+    ## attn out
+    decoder_attn_out_flops_fwd = (
+        2 * num_layers * batch_size * num_heads * seq_len * (hidden_size_per_head) * hidden_size
+    )
+    # FF
+    ## 1st layer
+    decoder_ffn_1_flops_fwd = 4 * num_layers * batch_size * seq_len * (hidden_size) * ffn_hidden_size
+    ## 2nd layer
+    decoder_ffn_2_flops_fwd = 2 * num_layers * batch_size * seq_len * (ffn_hidden_size) * hidden_size
+
+    decoder_flops_fwd = (
+        decoder_qkv_proj_flops_fwd
+        + decoder_qk_logits_flops_fwd
+        + decoder_v_logits_flops_fwd
+        + decoder_attn_out_flops_fwd
+        + decoder_ffn_1_flops_fwd
+        + decoder_ffn_2_flops_fwd
+    )
+
+    # lm head
+    lm_head_flops_fwd = 2 * batch_size * seq_len * (hidden_size) * vocab_size
+
+    # the bwd pass requires double the flops in case of matmuls to calculate the gradients with respect to
+    # both input and weight tensors
+    model_flops = 3 * (decoder_flops_fwd + lm_head_flops_fwd)  # 1 for fwd + 2 for bwd
+
+    hardware_flops = model_flops  # TODO: This is a placeholder for now
+
+    return model_flops, hardware_flops
