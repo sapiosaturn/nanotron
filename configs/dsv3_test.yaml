@@ -67,6 +67,7 @@ model:
     score_func: sigmoid
     route_scale: 1.0
     moe_intermediate_size: 256
+    gamma: 0.01
     q_lora_rank: 256
     kv_lora_rank: 256
     qk_nope_head_dim: 96

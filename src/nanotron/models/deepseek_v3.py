@@ -481,7 +481,7 @@ class DeepSeekV3Gate(nn.Module):
         self.score_func = config.score_func
         self.route_scale = config.route_scale
         self.weight = nn.Parameter(torch.empty(config.n_routed_experts, config.hidden_size))
-        self.bias = nn.Parameter(torch.empty(config.n_routed_experts)) if self.dim == 7168 else None # what? (taken from deepseek v3 reference implementation) (probably related to router load-balancing)
+        self.bias = nn.Parameter(torch.empty(config.n_routed_experts), requires_grad=False) # for aux loss free load balancing
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -498,7 +498,7 @@ class DeepSeekV3Gate(nn.Module):
             scores = scores.softmax(dim=-1, dtype=torch.float32)
         else:
             scores = scores.sigmoid()
-        original_scores = scores
+        original_scores = scores.clone()
         if self.bias is not None:
             scores = scores + self.bias
         if self.n_groups > 1:
@@ -516,7 +516,6 @@ class DeepSeekV3Gate(nn.Module):
             weights /= weights.sum(dim=-1, keepdim=True)
         weights *= self.route_scale
         return weights.type_as(x), indices # shapes are [batch_size, topk]
-
 
 class DeepSeekV3MoE(nn.Module):
     def __init__(
@@ -583,6 +582,7 @@ class DeepSeekV3MoE(nn.Module):
         weights, indices = self.gate(x)
         routed_output = torch.zeros_like(x)
         counts = torch.bincount(indices.flatten(), minlength=self.n_routed_experts).tolist()
+        expert_load = torch.bincount(indices.flatten(), minlength=self.n_routed_experts).float()
 
         for i in range(self.routed_start_idx, self.routed_end_idx):
             if counts[i] == 0:
@@ -612,6 +612,7 @@ class DeepSeekV3MoE(nn.Module):
 
         return {
             "hidden_states": combined_output,
+            "expert_load": expert_load,
         }
 
 class DeepSeekV3Layer(nn.Module):
@@ -662,7 +663,9 @@ class DeepSeekV3Layer(nn.Module):
         hidden_states = mlp_output["hidden_states"]
         hidden_states = hidden_states + residual
 
-        return hidden_states, output["sequence_mask"]
+        expert_load = mlp_output.get("expert_load", None)
+
+        return hidden_states, output["sequence_mask"], expert_load
 
     def _checkpointed_forward(
         self,
@@ -681,11 +684,12 @@ class DeepSeekV3Layer(nn.Module):
         if self.recompute_layer and not isinstance(hidden_states, TensorPointer):
             hidden_states, sequence_mask = self._checkpointed_forward(hidden_states, sequence_mask, self.freqs_cis)
         else:
-            hidden_states, sequence_mask = self._core_forward(hidden_states, sequence_mask, self.freqs_cis)
+            hidden_states, sequence_mask, expert_load = self._core_forward(hidden_states, sequence_mask, self.freqs_cis)
 
         return {
             "hidden_states": hidden_states,
             "sequence_mask": sequence_mask,
+            "expert_load": expert_load,
         }
 
 class DeepSeekV3Model(nn.Module):
@@ -739,7 +743,7 @@ class DeepSeekV3Model(nn.Module):
                     "layer_idx": layer_idx,
                 },
                 module_input_keys={"hidden_states", "sequence_mask"},
-                module_output_keys={"hidden_states", "sequence_mask"},
+                module_output_keys={"hidden_states", "sequence_mask", "expert_load"},
             )
             for layer_idx in range(config.num_hidden_layers)
         ])
@@ -798,18 +802,21 @@ class DeepSeekV3Model(nn.Module):
             "sequence_mask": input_mask,
         }
 
+        all_expert_loads = []
+
         for encoder_block in self.decoder:
             block_output = encoder_block(**hidden_encoder_states)
             hidden_encoder_states = {
                 "hidden_states": block_output["hidden_states"],
                 "sequence_mask": block_output["sequence_mask"],
             }
+            all_expert_loads.append(block_output.get("expert_load", None))
 
         hidden_states = self.final_layer_norm(input=hidden_encoder_states["hidden_states"])["hidden_states"]
         sharded_logits = self.lm_head(x=hidden_states)["logits"]
         fp32_sharded_logits = self.cast_to_fp32(x=sharded_logits)["output"]
 
-        return fp32_sharded_logits, hidden_states
+        return fp32_sharded_logits, hidden_states, all_expert_loads
 
     def get_block_compute_costs(self):
         """Computes the compute cost of each block in the model so that we can do a better job of load balancing."""
@@ -887,7 +894,7 @@ class DeepSeekV3ForTraining(NanotronModel):
         label_mask: Union[torch.Tensor, TensorPointer],
     ) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
         # Forward pass
-        sharded_logits, _ = self.model.forward_with_hidden_states(
+        sharded_logits, _, all_expert_loads = self.model.forward_with_hidden_states(
             input_ids=input_ids, input_mask=input_mask
         )
 
@@ -897,7 +904,30 @@ class DeepSeekV3ForTraining(NanotronModel):
             label_mask=label_mask,
         )["loss"]
 
+        self.adjust_routing_biases(all_expert_loads, self.config.gamma)
+
         return {"loss": loss}
+
+    @torch.no_grad()
+    def adjust_routing_biases(self, all_expert_loads, gamma=0.01):
+        """Adjust the routing biases for load balancing."""
+
+        for layer, expert_load in zip(self.model.decoder, all_expert_loads):
+            if expert_load is None:
+                continue
+            moe_layer = layer.pp_block.mlp
+            if isinstance(moe_layer, DeepSeekV3MoE):
+                # Gather expert load across TP workers
+                dist.all_reduce(expert_load, group=self.parallel_context.tp_pg)
+
+                avg_load = expert_load.mean()
+
+                overloaded = expert_load > avg_load
+                underloaded = expert_load < avg_load
+
+                # Adjust biases
+                moe_layer.gate.routing_bias[overloaded] -= gamma
+                moe_layer.gate.routing_bias[underloaded] += gamma
 
     def get_block_compute_costs(self):
         """Return the compute costs of each block in the model."""

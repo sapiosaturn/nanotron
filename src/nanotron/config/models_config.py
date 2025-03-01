@@ -229,6 +229,7 @@ class DeepSeekV3Config:
     score_func: Literal["softmax", "sigmoid"] = "sigmoid"
     route_scale: float = 1.0
     moe_intermediate_size: int = 256
+    gamma: float = 0.01
 
     # MLA configuration
     q_lora_rank: int = 256
