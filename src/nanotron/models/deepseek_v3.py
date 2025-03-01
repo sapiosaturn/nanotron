@@ -641,8 +641,8 @@ class DeepSeekV3Layer(nn.Module):
             tp_pg=tp_pg,
             layer_idx=layer_idx,
         )
-
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.freqs_cis = precompute_freqs_cis(config=config)
  
         # Use MoE for layers beyond the dense layers
         if layer_idx >= config.n_dense_layers:
@@ -688,27 +688,12 @@ class DeepSeekV3Layer(nn.Module):
         self,
         hidden_states: Union[torch.Tensor, TensorPointer],
         sequence_mask: Union[torch.Tensor, TensorPointer],
-        position_ids: Optional[Union[torch.Tensor, TensorPointer]] = None,
     ) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
         # Compute rotary embeddings
-        batch_size, seq_length = hidden_states.shape[0], hidden_states.shape[1]
-        if position_ids is None:
-            # For inference with kv cache, we need to keep track of past_length
-            store = self.attn.get_local_store() if hasattr(self.attn, 'get_local_store') else None
-            if store is not None and "past_length" in store:
-                past_length = store["past_length"].unsqueeze(-1)
-                position_ids = torch.arange(seq_length, device=hidden_states.device).unsqueeze(0) + past_length
-            else:
-                position_ids = torch.arange(seq_length, device=hidden_states.device).unsqueeze(0).expand(batch_size, -1)
-
-        # Generate rotary embeddings based on position IDs
-        freqs_cis = precompute_freqs_cis(config=self.attn.config)
-        freqs_cis = freqs_cis[position_ids.reshape(-1)].reshape(batch_size, seq_length, -1)
-
         if self.recompute_layer and not isinstance(hidden_states, TensorPointer):
-            hidden_states, sequence_mask = self._checkpointed_forward(hidden_states, sequence_mask, freqs_cis)
+            hidden_states, sequence_mask = self._checkpointed_forward(hidden_states, sequence_mask, self.freqs_cis)
         else:
-            hidden_states, sequence_mask = self._core_forward(hidden_states, sequence_mask, freqs_cis)
+            hidden_states, sequence_mask = self._core_forward(hidden_states, sequence_mask, self.freqs_cis)
 
         return {
             "hidden_states": hidden_states,
@@ -765,7 +750,7 @@ class DeepSeekV3Model(nn.Module):
                     "tp_pg": parallel_context.tp_pg,
                     "layer_idx": layer_idx,
                 },
-                module_input_keys={"hidden_states", "sequence_mask", "position_ids"},
+                module_input_keys={"hidden_states", "sequence_mask"},
                 module_output_keys={"hidden_states", "sequence_mask"},
             )
             for layer_idx in range(config.num_hidden_layers)
