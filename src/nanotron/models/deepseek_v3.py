@@ -850,19 +850,13 @@ class Loss(nn.Module):
         label_ids: torch.Tensor,  # [batch_size, seq_length]
         label_mask: torch.Tensor,  # [batch_size, seq_length]
     ) -> Dict[str, torch.Tensor]:
-        # Cast label_ids and label_mask to the right dtype
-        label_ids = label_ids.to(dtype=torch.int64, device=sharded_logits.device)
-        label_mask = label_mask.to(device=sharded_logits.device)
-
         # Calculate cross entropy loss
         ce_loss = sharded_cross_entropy(
-            sharded_logits, label_ids, tp_group=self.tp_pg, ignore_index=-100
+            sharded_logits, label_ids, group=self.tp_pg, dtype=torch.float
         )
+        loss = masked_mean(ce_loss, label_mask, dtype=torch.float)
 
-        # Apply mask to get the actual loss - ignore padded tokens
-        masked_ce_loss = masked_mean(ce_loss, label_mask, sharded_logits.dtype)
-
-        return {"loss": masked_ce_loss}
+        return {"loss": loss}
 
 @torch.jit.script
 def masked_mean(loss, label_mask, dtype):
