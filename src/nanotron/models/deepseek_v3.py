@@ -585,7 +585,7 @@ class DeepSeekV3MoE(nn.Module):
         self.tp_pg = tp_pg
 
     def forward(self, hidden_states):
-        x = hidden_states["hidden_states"]
+        x = hidden_states
 
         original_shape = x.size()
         x = x.view(-1, self.hidden_size)
