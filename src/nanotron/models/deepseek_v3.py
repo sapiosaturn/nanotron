@@ -926,8 +926,8 @@ class DeepSeekV3ForTraining(NanotronModel):
                 underloaded = expert_load < avg_load
 
                 # Adjust biases
-                moe_layer.gate.routing_bias[overloaded] -= gamma
-                moe_layer.gate.routing_bias[underloaded] += gamma
+                moe_layer.gate.bias[overloaded] -= gamma
+                moe_layer.gate.bias[underloaded] += gamma
 
     def get_block_compute_costs(self):
         """Return the compute costs of each block in the model."""
