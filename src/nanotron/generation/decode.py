@@ -12,6 +12,7 @@ from nanotron.distributed import ProcessGroup, get_global_rank
 from nanotron.generation.generate_store import Store, attach_store
 from nanotron.generation.sampler import BasicSampler, GreedySampler, SamplerType, TopKSampler, TopPSampler
 from nanotron.helpers import log_throughput
+from nanotron.models.deepseek_v3 import DeepSeekV3Model
 from nanotron.models.llama import LlamaModel
 from nanotron.parallel import ParallelContext
 from nanotron.parallel.pipeline_parallel.block import get_min_max_rank
@@ -443,8 +444,12 @@ def decode_text(
             for state, batch in zip(decoder_states, batches):
                 if is_decoder_input_rank:
                     assert all(isinstance(elt, torch.Tensor) for elt in state.generation_ids)
-                    batch_generated_ids = torch.cat(state.generation_ids, dim=-1)
-                    batch_generated_mask = torch.cat(state.generation_mask, dim=-1)
+                    if isinstance(model, DeepSeekV3Model):
+                        batch_generated_ids = torch.cat(state.generation_ids.transpose(0, 1), dim=-1)
+                        batch_generated_mask = torch.cat(state.generation_mask.transpose(0, 1), dim=-1)
+                    else:
+                        batch_generated_ids = torch.cat(state.generation_ids, dim=-1)
+                        batch_generated_mask = torch.cat(state.generation_mask, dim=-1)
                 else:
                     assert all(isinstance(elt, TensorPointer) for elt in state.generation_ids)
                     batch_generated_ids = TensorPointer(group_rank=decoder_input_rank)

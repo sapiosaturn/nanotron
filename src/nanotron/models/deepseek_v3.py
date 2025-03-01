@@ -134,7 +134,7 @@ def apply_rotary_emb(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
     """
     dtype = x.dtype
     x = torch.view_as_complex(x.float().view(*x.shape[:-1], -1, 2))
-    freqs_cis = freqs_cis.view(1, x.size(1), 1, x.size(-1))
+    freqs_cis = freqs_cis[:x.size(1)].view(1, x.size(1), 1, x.size(-1))
     y = torch.view_as_real(x * freqs_cis).flatten(3)
     return y.to(dtype)
 
@@ -151,17 +151,6 @@ class Embedding(nn.Module, AttachableStore):
         self.pg = tp_pg
 
     def forward(self, input_ids: torch.Tensor, input_mask: torch.Tensor):  # [batch_size, seq_length]
-        store = self.get_local_store()
-        if store is not None:
-            if "past_length" in store:
-                past_length = store["past_length"]
-            else:
-                past_length = torch.zeros(1, dtype=torch.long, device=input_ids.device).expand(input_ids.shape[0])
-
-            cumsum_mask = input_mask.cumsum(-1, dtype=torch.long)
-            # Store new past_length in store
-            store["past_length"] = past_length + cumsum_mask[:, -1]
-
         # Format input in `[seq_length, batch_size]` to support high TP with low batch_size
         # input_ids = input_ids.transpose(0, 1)
         # for now, we stay with [batch_size, seq_length]
@@ -642,8 +631,7 @@ class DeepSeekV3Layer(nn.Module):
             layer_idx=layer_idx,
         )
         self.post_attention_layernorm = TritonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.register_buffer("freqs_cis", precompute_freqs_cis(config=config))
- 
+        self.register_buffer("freqs_cis", precompute_freqs_cis(config=config), persistent=False)
         # Use MoE for layers beyond the dense layers
         if layer_idx >= config.n_dense_layers:
             self.mlp = DeepSeekV3MoE(config=config, parallel_config=parallel_config, tp_pg=tp_pg)
