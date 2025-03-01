@@ -313,8 +313,8 @@ class DeepSeekV3MLA(nn.Module, AttachableStore):
         )
 
         self.prefill_kv_len = (
-            config.max_position_embeddings
-        )  # TODO @nouamane: compute based on free memory, because in rope we can surpass max_position_embeddings
+            config.seq_len
+        )  # TODO @nouamane: compute based on free memory, because in rope we can surpass seq_len
 
     def forward(
         self,
