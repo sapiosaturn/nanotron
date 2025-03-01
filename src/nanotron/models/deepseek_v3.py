@@ -491,7 +491,7 @@ class DeepSeekV3Gate(nn.Module):
         self.topk_groups = config.n_limited_groups
         self.score_func = config.score_func
         self.route_scale = config.route_scale
-        self.weight = nn.Parameter(torch.empty(config.n_routed_experts, config.dim))
+        self.weight = nn.Parameter(torch.empty(config.n_routed_experts, config.hidden_size))
         self.bias = nn.Parameter(torch.empty(config.n_routed_experts)) if self.dim == 7168 else None # what? (taken from deepseek v3 reference implementation)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
