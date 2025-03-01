@@ -846,24 +846,19 @@ class DeepSeekV3Model(nn.Module):
 
     def get_block_compute_costs(self):
         """Computes the compute cost of each block in the model so that we can do a better job of load balancing."""
-        # This function is usually implemented for pipeline parallelism optimization
-        # Following the pattern from LlamaModel
-        compute_weight = 2  # hyperparameter to control compute vs memory trade-off
-        compute_costs = {}
-
-        embedding_numel = self.token_position_embeddings.module.token_embedding.weight.numel()
-        compute_costs["token_position_embeddings"] = compute_weight * embedding_numel
-
-        # Cost for each decoder layer
-        for i, layer in enumerate(self.decoder):
-            compute_costs[f"decoder.{i}"] = compute_weight * self.config.hidden_size**2 * 12
-
-        # Cost for final layernorm and language model head
-        compute_costs["final_layer_norm"] = compute_weight * self.config.hidden_size
-        compute_costs["lm_head"] = compute_weight * self.config.hidden_size * self.config.vocab_size
-        compute_costs["cast_to_fp32"] = 0  # negligible cost
-
-        return compute_costs
+        model_config = self.config
+        block_compute_costs = {
+            # CausalSelfAttention (qkv proj + attn out) + MLP
+            DeepSeekV3Layer: model_config.hidden_size * model_config.q_lora_rank + \
+                model_config.hidden_size * (model_config.kv_lora_rank + model_config.qk_rope_head_dim) + \
+                model_config.q_lora_rank * model_config.num_attention_heads * (model_config.qk_nope_head_dim + model_config.qk_rope_head_dim) + \
+                model_config.kv_lora_rank * model_config.num_attention_heads * (model_config.qk_nope_head_dim + model_config.v_head_dim) + \
+                model_config.hidden_size * (model_config.v_head_dim * model_config.num_attention_heads) + \
+                3 * model_config.intermediate_size * model_config.hidden_size, #TODO: find a way to distinguish between MoE and dense here
+            # This is the last lm_head
+            TensorParallelColumnLinear: model_config.vocab_size * model_config.hidden_size,
+        }
+        return block_compute_costs
 
 class Loss(nn.Module):
     def __init__(self, tp_pg: dist.ProcessGroup):
