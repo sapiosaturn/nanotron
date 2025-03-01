@@ -7,7 +7,6 @@ from torch import nn
 from torch.nn import init
 
 from nanotron.config import ModelArgs
-from nanotron.models.deepseek_v3 import DeepSeekV3Gate
 from nanotron.nn.layer_norm import TritonRMSNorm
 from nanotron.parallel.tensor_parallel.nn import (
     TensorParallelColumnLinear,
@@ -39,6 +38,7 @@ class Parametrizator:
 class StandardParametrizator(Parametrizator):
     def __init__(self, config: ModelArgs):
         super().__init__(config)
+        from nanotron.models.deepseek_v3 import DeepSeekV3Gate
         self.MODULE_TO_PARAMETRIZE = {
             TensorParallelColumnLinear: self._parametrize_column_linear,
             TensorParallelRowLinear: self._parametrize_row_linear,
