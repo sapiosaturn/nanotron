@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
 
 @dataclass
@@ -190,5 +190,74 @@ class Starcoder2Config:
     def n_inner(self):
         return self.intermediate_size
 
+@dataclass
+class DeepSeekV3Config:
+    """
+    Configuration for a DeepSeekV3 model
+    """
 
-NanotronConfigs = Union[VellichorConfig, LlamaConfig, Starcoder2Config, Any]
+    # Basic model configuration
+    bos_token_id: int = 1
+    eos_token_id: int = 2
+    hidden_act: str = "silu"
+    hidden_size: int = 1024  # Same as dim
+    initializer_range: float = 0.02
+    intermediate_size: int = 4096  # Same as inter_dim
+    is_deepseekv3_config: bool = True  # We use this to differentiate models in yaml/python conversion
+    seq_len: int = 2048 # this is max_position_embeddings but I think this is a better name
+    original_seq_len: int = 2048
+    num_attention_heads: int = 16  # Same as n_heads
+    num_hidden_layers: int = 24  # Same as n_layers
+    num_key_value_heads: Optional[int] = None
+    pad_token_id: Optional[int] = None
+    rms_norm_eps: float = 1e-5
+    tie_word_embeddings: bool = True
+    use_cache: bool = False # for training
+    vocab_size: int = 32000
+
+    # DeepSeekV3 specific parameters
+    max_batch_size: int = 4 # this should be set to whatever micro-batch size for training
+    dtype: str = "bfloat16" # TODO: potentially not needed, but not sure
+    n_dense_layers: int = 1 # first few layers are not MoE
+
+    # MoE configuration
+    n_routed_experts: int = 6
+    n_shared_experts: int = 2
+    n_activated_experts: int = 4
+    n_expert_groups: int = 1
+    n_limited_groups: int = 1
+    score_func: Literal["softmax", "sigmoid"] = "sigmoid"
+    route_scale: float = 1.0
+    moe_intermediate_size: int = 256
+
+    # MLA configuration
+    q_lora_rank: int = 256
+    kv_lora_rank: int = 256
+    qk_nope_head_dim: int = 96
+    qk_rope_head_dim: int = 32
+    v_head_dim: int = 128
+    attn_impl: Literal["naive", "fused"] = "naive"
+
+    # Positional encoding configuration
+    rope_theta: float = 10000.0
+    rope_factor: float = 1.0
+    beta_fast: int = 32
+    beta_slow: int = 1
+    mscale: float = 1.0
+    rope_scaling: Optional[dict] = None
+    rope_interleaved: bool = False
+
+    def __post_init__(self):
+        # NOTE: user don't set self._init_method, ModelArgs will set it
+        self._is_using_mup: bool = False
+        # self._init_method: Optional[Union[RandomInit, SpectralMupInit, ExistingCheckpointInit]] = None
+
+        # for backward compatibility
+        if self.num_key_value_heads is None:
+            self.num_key_value_heads = self.num_attention_heads
+
+    @property
+    def is_using_mup(self) -> bool:
+        return self._is_using_mup
+
+NanotronConfigs = Union[VellichorConfig, LlamaConfig, Starcoder2Config, DeepSeekV3Config, Any]

@@ -12,7 +12,11 @@ from nanotron.parallel.tensor_parallel.nn import (
 )
 from torch import nn
 from torch.nn import init
-import fla.layers
+
+try:
+    import fla.layers
+except ImportError:
+    pass
 
 class ParametrizationMethod(Enum):
     STANDARD = auto()

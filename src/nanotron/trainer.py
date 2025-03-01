@@ -57,6 +57,7 @@ from nanotron.logging import (
 )
 from nanotron.models import NanotronModel, build_model
 from nanotron.models.base import check_model_has_grad
+from nanotron.models.deepseek_v3 import DeepSeekV3ForTraining
 from nanotron.models.llama import LlamaForTraining, RotaryEmbedding
 from nanotron.models.starcoder2 import Starcoder2ForTraining
 from nanotron.models.vellichor import VellichorForTraining
@@ -107,6 +108,7 @@ CONFIG_TO_MODEL_CLASS = {
     "LlamaConfig": LlamaForTraining,
     "Starcoder2Config": Starcoder2ForTraining,
     "VellichorConfig": VellichorForTraining,
+    "DeepSeekV3Config": DeepSeekV3ForTraining
 }
 
 try:
