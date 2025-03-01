@@ -670,7 +670,7 @@ class DeepSeekV3Layer(nn.Module):
         hidden_states = self.post_attention_layernorm(hidden_states)
 
         # MoE or MLP layers
-        mlp_output = self.mlp({"hidden_states": hidden_states})
+        mlp_output = self.mlp(hidden_states)
         hidden_states = mlp_output["hidden_states"]
         hidden_states = hidden_states + residual
 
