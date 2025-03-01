@@ -11,7 +11,7 @@ import math
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import torch
-from torch import nn, Tensor
+from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import CheckpointFunction
 
@@ -23,7 +23,7 @@ from nanotron.generation.generate_store import AttachableStore
 from nanotron.logging import log_rank
 from nanotron.models import NanotronModel
 from nanotron.nn.activations import ACT2FN
-from nanotron.nn.normalization import TritonRMSNorm
+from nanotron.nn.layer_norm import TritonRMSNorm
 from nanotron.parallel import ParallelContext
 from nanotron.parallel.parameters import NanotronParameter
 from nanotron.parallel.pipeline_parallel.block import PipelineBlock, TensorPointer
@@ -695,7 +695,6 @@ class DeepSeekV3Layer(nn.Module):
         hidden_states: Union[torch.Tensor, TensorPointer],
         sequence_mask: Union[torch.Tensor, TensorPointer],
         position_ids: Optional[Union[torch.Tensor, TensorPointer]] = None,
-        freqs_cis: Optional[Union[torch.Tensor, TensorPointer]] = None,
     ) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
         # Compute rotary embeddings
         batch_size, seq_length = hidden_states.shape[0], hidden_states.shape[1]
@@ -708,18 +707,14 @@ class DeepSeekV3Layer(nn.Module):
             else:
                 position_ids = torch.arange(seq_length, device=hidden_states.device).unsqueeze(0).expand(batch_size, -1)
 
-        # If freqs_cis not provided, generate it - should be rare now as it's precomputed
-        if freqs_cis is None:
-            # Generate rotary embeddings based on position IDs
-            freqs_cis = precompute_freqs_cis(config=self.config)
-        
-        # Apply position-specific indexing to the precomputed freqs_cis
-        position_freqs_cis = freqs_cis.index_select(0, position_ids.reshape(-1)).reshape(batch_size, seq_length, -1)
+        # Generate rotary embeddings based on position IDs
+        freqs_cis = precompute_freqs_cis(config=self.attn.config)
+        freqs_cis = freqs_cis[position_ids.reshape(-1)].reshape(batch_size, seq_length, -1)
 
         if self.recompute_layer and not isinstance(hidden_states, TensorPointer):
-            hidden_states, sequence_mask = self._checkpointed_forward(hidden_states, sequence_mask, position_freqs_cis)
+            hidden_states, sequence_mask = self._checkpointed_forward(hidden_states, sequence_mask, freqs_cis)
         else:
-            hidden_states, sequence_mask = self._core_forward(hidden_states, sequence_mask, position_freqs_cis)
+            hidden_states, sequence_mask = self._core_forward(hidden_states, sequence_mask, freqs_cis)
 
         return {
             "hidden_states": hidden_states,
@@ -747,9 +742,6 @@ class DeepSeekV3Model(nn.Module):
             parallel_config.tp_linear_async_communication if parallel_config is not None else False
         )
 
-        # Precompute freqs_cis for rotary positional embeddings - compute once and reuse
-        self.freqs_cis = precompute_freqs_cis(config=config).to(device=torch.device("cuda"))
-        
         # Token embeddings
         self.token_position_embeddings = PipelineBlock(
             p2p=self.p2p,
@@ -779,7 +771,7 @@ class DeepSeekV3Model(nn.Module):
                     "tp_pg": parallel_context.tp_pg,
                     "layer_idx": layer_idx,
                 },
-                module_input_keys={"hidden_states", "sequence_mask", "position_ids", "freqs_cis"},
+                module_input_keys={"hidden_states", "sequence_mask", "position_ids"},
                 module_output_keys={"hidden_states", "sequence_mask"},
             )
             for layer_idx in range(config.num_hidden_layers)
@@ -837,7 +829,6 @@ class DeepSeekV3Model(nn.Module):
         hidden_encoder_states = {
             "hidden_states": output["input_embeds"],
             "sequence_mask": input_mask,
-            "freqs_cis": self.freqs_cis,  # Pass the precomputed freqs_cis to all layers
         }
 
         for encoder_block in self.decoder:
@@ -845,7 +836,6 @@ class DeepSeekV3Model(nn.Module):
             hidden_encoder_states = {
                 "hidden_states": block_output["hidden_states"],
                 "sequence_mask": block_output["sequence_mask"],
-                "freqs_cis": self.freqs_cis,  # Keep passing the precomputed freqs_cis
             }
 
         hidden_states = self.final_layer_norm(input=hidden_encoder_states["hidden_states"])["hidden_states"]
@@ -957,6 +947,13 @@ class DeepSeekV3ForTraining(NanotronModel):
         """Return the compute costs of each block in the model."""
         return self.model.get_block_compute_costs()
 
+    def get_embeddings_lm_head_tied_names(self):
+        """Get the names of the tied embeddings and lm_head weights"""
+        if self.config.tie_word_embeddings is True:
+            return ["model.token_position_embeddings.pp_block.token_embedding.weight", "model.lm_head.pp_block.weight"]
+        else:
+            return []
+
     def get_flops_per_sec(self, iteration_time_in_sec, sequence_length, global_batch_size):
         """Calculate model throughput in FLOPS."""
         num_layers = self.config.num_hidden_layers
@@ -979,6 +976,66 @@ class DeepSeekV3ForTraining(NanotronModel):
         )
 
         return total_flops / iteration_time_in_sec
+
+    @torch.no_grad()
+    def init_model_randomly(self, config: Config):
+        """Initialize model parameters randomly.
+        Note:
+            Layernorm weight all 0 or 1 depending on `apply_layernorm_1p`
+        """
+        init_method = config.model.init_method
+        if isinstance(init_method, RandomInit):
+            parametrizator_cls = StandardParametrizator
+        elif isinstance(init_method, SpectralMupInit):
+            parametrizator_cls = SpectralMupParametrizator
+        else:
+            raise ValueError(f"Unknown init method {init_method}")
+
+        parametrizator = parametrizator_cls(config=config.model)
+
+        log_rank(
+            f"Parametrizing model parameters using {parametrizator.__class__.__name__}",
+            logger=logger,
+            level=logging.INFO,
+            rank=0,
+        )
+
+        model = self
+        initialized_parameters = set()
+        # Handle tensor parallelism
+        module_id_to_prefix = {id(module): f"{module_name}." for module_name, module in model.named_modules()}
+        # Fix the root_model
+        module_id_to_prefix[id(model)] = ""
+
+        for param_name, param in model.named_parameters():
+            assert isinstance(param, NanotronParameter)
+
+            module_name, param_name = param_name.rsplit(".", 1)
+
+            if param.is_tied:
+                tied_info = param.get_tied_info()
+                full_param_name = tied_info.get_full_name_from_module_id_to_prefix(
+                    module_id_to_prefix=module_id_to_prefix
+                )
+            else:
+                full_param_name = f"{module_name}.{param_name}"
+
+            if full_param_name in initialized_parameters:
+                # Already initialized
+                continue
+
+            module = model.get_submodule(module_name)
+            parametrizator.parametrize(param_name, module)
+
+            assert full_param_name not in initialized_parameters
+            initialized_parameters.add(full_param_name)
+
+        assert initialized_parameters == {
+            param.get_tied_info().get_full_name_from_module_id_to_prefix(module_id_to_prefix=module_id_to_prefix)
+            if param.is_tied
+            else name
+            for name, param in model.named_parameters()
+        }, f"Somehow the initialized set of parameters don't match:\n - Expected: { {name for name, _ in model.named_parameters()} }\n - Got: {initialized_parameters}"
 
 # Note: We reuse the get_flops function from the llama model
 def get_flops(
