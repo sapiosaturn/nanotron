@@ -3,15 +3,17 @@ from abc import abstractmethod
 from enum import Enum, auto
 from typing import Dict
 
+from torch import nn
+from torch.nn import init
+
 from nanotron.config import ModelArgs
+from nanotron.models.deepseek_v3 import DeepSeekV3Gate
 from nanotron.nn.layer_norm import TritonRMSNorm
 from nanotron.parallel.tensor_parallel.nn import (
     TensorParallelColumnLinear,
     TensorParallelEmbedding,
     TensorParallelRowLinear,
 )
-from torch import nn
-from torch.nn import init
 
 try:
     import fla.layers
@@ -46,6 +48,7 @@ class StandardParametrizator(Parametrizator):
             fla.layers.gated_deltanet.GatedDeltaNet: self._do_nothing,
             fla.modules.convolution.ShortConvolution: self._do_nothing,
             fla.modules.fused_norm_gate.FusedRMSNormSwishGate: self._do_nothing,
+            DeepSeekV3Gate: self._parametrize_dsv3_gate,
         }
 
         self.std = config.init_method.std
@@ -54,6 +57,15 @@ class StandardParametrizator(Parametrizator):
     def _do_nothing(self, param_name: str, module: nn.Module):
         # for things like flash linear attention where they handle their own initialization, can change later
         pass
+
+    # TODO: figure out what the best init for the router is
+    def _parametrize_dsv3_gate(self, param_name: str, module: nn.Module):
+        assert param_name in ["weight", "bias"]
+
+        if param_name == "weight":
+            init.normal_(module.weight, mean=0.0, std=self.std)
+        elif param_name == "bias":
+            module.bias.zero_()
 
     def _parametrize_nn_linear(self, param_name: str, module: nn.Module):
         assert param_name in ["weight", "bias"]
