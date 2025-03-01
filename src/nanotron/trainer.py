@@ -637,6 +637,17 @@ class DistributedTrainer:
             if self.config.optimizer.clip_grad is not None:
                 log_entries.append(LogItem("grad_norm", self.grad_norm_unclipped.item(), "human_format"))  # , ".3f"))
 
+            cached_metrics = self.unwrapped_model.get_cached_metrics()
+            if cached_metrics:
+                log_entries.extend([
+                    LogItem("expert_load_mean", cached_metrics["expert_load_mean"], "human_format"),
+                    LogItem("expert_load_std", cached_metrics["expert_load_std"], "human_format"),
+                    LogItem("expert_load_max", cached_metrics["expert_load_max"], "human_format"),
+                    LogItem("expert_load_min", cached_metrics["expert_load_min"], "human_format"),
+                    LogItem("expert_load_cv", cached_metrics["expert_load_cv"], "human_format"),
+                    LogItem("expert_load_entropy", cached_metrics["expert_load_entropy"], "human_format"),
+                ])
+
             # Log not too often the memory
             if self.iteration_step < 5 or (self.iteration_step - 1) % self.config.checkpoints.checkpoint_interval == 0:
                 total, used, free = shutil.disk_usage("/")

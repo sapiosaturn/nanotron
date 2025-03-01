@@ -905,8 +905,40 @@ class DeepSeekV3ForTraining(NanotronModel):
         )["loss"]
 
         self.adjust_routing_biases(all_expert_loads, self.config.gamma)
+        self.compute_balance_metrics(all_expert_loads)
 
         return {"loss": loss}
+
+    def compute_balance_metrics(self, all_expert_loads):
+        """Compute the expert load balance metrics for the model."""
+        non_none_expert_loads = [e for e in all_expert_loads if e is not None]
+        if len(non_none_expert_loads) > 0:
+            # Concatenate all expert loads into a single tensor, to get variance across all experts
+            expert_loads_tensor = torch.cat(all_expert_loads).float()
+            # Compute metrics
+            mean_load = torch.mean(expert_loads_tensor)
+            std_load = torch.std(expert_loads_tensor)
+            max_load = torch.max(expert_loads_tensor)
+            min_load = torch.min(expert_loads_tensor)
+            cv_load = std_load / (mean_load + 1e-8)
+            # Compute entropy
+            load_probs = expert_loads_tensor / (torch.sum(expert_loads_tensor) + 1e-8)
+            entropy_load = -torch.sum(load_probs * torch.log(load_probs + 1e-8))
+
+            # Cache metrics
+            self.cached_metrics = {
+                "expert_load_mean": mean_load.item(),
+                "expert_load_std": std_load.item(),
+                "expert_load_max": max_load.item(),
+                "expert_load_min": min_load.item(),
+                "expert_load_cv": cv_load.item(),
+                "expert_load_entropy": entropy_load.item(),
+            }
+        else:
+            self.cached_metrics = {}
+
+    def get_cached_metrics(self):
+        return self.cached_metrics if self.cached_metrics is not None else {}
 
     @torch.no_grad()
     def adjust_routing_biases(self, all_expert_loads, gamma=0.01):
