@@ -211,7 +211,9 @@ class FP32GradientAccumulator(GradientAccumulator):
 
     def _accumulate_grad(self, name: str, half_param: NanotronParameter) -> None:
         """Accumulate grad in fp32 and set the fp32 grad to the fp32 grad buffer, so that optimizer can update fp32 weights afterwards"""
-        assert half_param.grad is not None, f"Expected param {name} to have gradient."
+        if half_param.grad is None:
+            # Skip parameters without gradients (common in MoE when some experts receive no tokens)
+            return
         fp32_grad = self.get_grad_buffer(name=name)
 
         if self._is_accumulation_sync_step is False:
